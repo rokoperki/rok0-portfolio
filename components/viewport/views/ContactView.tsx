@@ -37,7 +37,7 @@ export function ContactView({ config, isActive }: Props) {
   const [classifiedOpen, setClassifiedOpen] = useState(false);
   const [pktVal, setPktVal] = useState(0);
   const [latVal, setLatVal] = useState(24);
-  const [sigBars, setSigBars] = useState([[3], [3], [3], [3]]);
+  const [sigBars, setSigBars] = useState([[3], [3], [3], [3], [3]]);
   const clLineRef  = useRef<HTMLSpanElement>(null);
   const clNoteRef  = useRef<HTMLSpanElement>(null);
   const clResumeRef = useRef<HTMLAnchorElement>(null);
@@ -48,7 +48,7 @@ export function ContactView({ config, isActive }: Props) {
   // Live comms uplink updates
   useEffect(() => {
     const id = setInterval(() => {
-      setSigBars(sigBars.map(() => [3 + Math.floor(Math.random() * 3)]));
+      setSigBars(chans.map(() => [3 + Math.floor(Math.random() * 3)]));
       setLatVal(18 + Math.floor(Math.random() * 22));
       setPktVal((v) => v + 1 + Math.floor(Math.random() * 40));
     }, 900);
@@ -133,10 +133,11 @@ export function ContactView({ config, isActive }: Props) {
   }
 
   const chans = [
-    { k: 'EMAIL',       v: c.email,                             href: `mailto:${c.email}`, sec: 'OPEN',   port: '0x19' },
-    { k: 'GITHUB',      v: c.github.replace(/^https?:\/\//, ''), href: c.github,            sec: 'SECURE', port: '0x1BB' },
-    { k: 'X / TWITTER', v: c.x.replace(/^https?:\/\//, ''),     href: c.x,                 sec: 'SECURE', port: '0x1BB' },
-    { k: 'DISCORD',     v: c.discord,                            href: null,                sec: 'OPEN',   port: '0x0D' },
+    { k: 'EMAIL',     v: c.email,                              href: `mailto:${c.email}`,            sec: 'OPEN',   port: '0x19'  },
+    { k: 'GITHUB',    v: c.github.replace(/^https?:\/\//, ''), href: c.github,                       sec: 'SECURE', port: '0x1BB' },
+    { k: 'TELEGRAM',  v: '@' + c.telegram,                     href: `https://t.me/${c.telegram}`,   sec: 'SECURE', port: '0x3F' },
+    { k: 'X',         v: c.x.replace(/^https?:\/\//, ''),      href: c.x,                            sec: 'SECURE', port: '0x1BB' },
+    { k: 'DISCORD',   v: c.discord,                             href: null,                           sec: 'OPEN',   port: '0x0D'  },
   ] as const;
 
   return (

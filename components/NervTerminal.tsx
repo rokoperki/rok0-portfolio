@@ -70,6 +70,7 @@ function TerminalInner() {
       <div id="console" ref={consoleRef}>
         <TopBar handle={topBarRef} />
         <MobileTabs />
+        <div className="rok0-tag" aria-hidden="true">rok0</div>
 
         <div className="body">
           <MemoryMapNav />

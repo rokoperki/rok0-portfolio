@@ -41,6 +41,7 @@ export interface ContactInfo {
   github: string;
   x: string;
   discord: string;
+  telegram: string;
 }
 
 export interface ClassifiedInfo {
