@@ -4,7 +4,7 @@ import "./globals.css";
 const TITLE = "rok0 · Roko Perisic — Solana · Web3 Developer";
 const DESCRIPTION =
   "Rust developer from Split, Croatia working at the bottom of the Solana stack. Raw sBPF assembly programs, DeFi primitives, and full-stack web3 products. Currently at Solbound.dev.";
-const SITE_URL = "https://rok0.dev"; // update when you have a domain
+const SITE_URL = "https://rok0-portfolio.vercel.app";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
