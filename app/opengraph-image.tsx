@@ -144,26 +144,7 @@ export default async function OgImage() {
             strokeWidth="2"
             fill="rgba(255,59,31,0.05)"
           />
-          <polygon
-            points="260,240 334,284 334,336 260,380 186,336 186,284"
-            stroke="rgba(255,140,60,0.50)"
-            strokeWidth="1.5"
-            fill="rgba(255,106,0,0.07)"
-          />
         </svg>
-        {/* ROK0 text inside hex — Satori requires div, not SVG text */}
-        <div
-          style={{
-            fontFamily: MONO,
-            fontWeight: 900,
-            fontSize: 46,
-            color: "rgba(255,59,31,0.50)",
-            letterSpacing: "6px",
-            display: "flex",
-          }}
-        >
-          ROK0
-        </div>
       </div>
 
       {/* frame border */}
@@ -435,6 +416,7 @@ export default async function OgImage() {
               lineHeight: "0.9",
               letterSpacing: "0.01em",
               color: "#fff",
+              marginTop: 28,
             }}
           >
             rok0
