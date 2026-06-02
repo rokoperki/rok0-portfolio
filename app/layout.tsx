@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-const TITLE = "rok0 · Roko Perisic — Solana · Web3 Developer";
+const TITLE = "rok0";
 const DESCRIPTION =
   "Rust developer from Split, Croatia working at the bottom of the Solana stack. Raw sBPF assembly programs, DeFi primitives, and full-stack web3 products. Currently at Solbound.dev.";
 const SITE_URL = "https://rok0.net";
