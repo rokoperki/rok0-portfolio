@@ -41,7 +41,6 @@ export interface ContactInfo {
   github: string;
   x: string;
   discord: string;
-  telegram: string;
 }
 
 export interface ClassifiedInfo {
@@ -68,7 +67,7 @@ export interface Config {
   classified: ClassifiedInfo;
 }
 
-export type SectionId = 'about' | 'projects' | 'contact';
+export type SectionId = "about" | "projects" | "contact";
 
 export interface Section {
   id: SectionId;
@@ -98,7 +97,11 @@ export interface SortieHandle {
 }
 
 export interface TribunalHandle {
-  run: (query: string, cb: ((ok: boolean) => void) | null, forceOk: boolean) => void;
+  run: (
+    query: string,
+    cb: ((ok: boolean) => void) | null,
+    forceOk: boolean,
+  ) => void;
 }
 
 export interface MagiHandle {

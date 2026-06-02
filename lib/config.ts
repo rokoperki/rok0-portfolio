@@ -175,7 +175,6 @@ export const CONFIG: Config = {
     github: "https://github.com/rokoperki",
     x: "https://x.com/rok0_sol",
     discord: "rokoperki",
-    telegram: "rokoperk1",
   },
 
   unitLabel: "UNIT 01",
