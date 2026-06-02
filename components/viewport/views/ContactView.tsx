@@ -1,7 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { PublicKey } from "@solana/web3.js";
 import type { Config } from "@/lib/types";
+import type { OverseerRecord } from "@/lib/solana/types";
+import {
+  CLEARANCE_LABELS,
+  CLEARANCE_CSS,
+  relativeTime,
+} from "@/lib/solana/types";
+import {
+  fetchOverseerRecord,
+  fetchRoster,
+  findOverseerPDA,
+  buildRegisterTx,
+  buildHeartbeatTx,
+  buildBootstrapTx,
+  sendAndConfirm,
+  GENESIS,
+} from "@/lib/solana/guestlist";
 import { useNerv } from "@/components/context/NervContext";
 import { Sound } from "@/lib/sound";
 
@@ -11,6 +28,26 @@ interface Props {
 }
 
 const CHARS_DECRYPT = "0123456789ABCDEF░▒▓█";
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function rosterLine(r: OverseerRecord): string {
+  return [
+    r.codename || "???",
+    CLEARANCE_LABELS[r.clearance],
+    `visits ${r.visits}`,
+    relativeTime(r.lastSeen),
+  ].join("  //  ");
+}
+
+function scrambleLine(s: string): string {
+  return s
+    .split("")
+    .map((c) => {
+      if (c === " " || c === "/") return c;
+      return B58[Math.floor(Math.random() * B58.length)];
+    })
+    .join("");
+}
 
 function decryptAnimate(el: HTMLElement, target: string) {
   let f = 0;
@@ -33,6 +70,35 @@ function decryptAnimate(el: HTMLElement, target: string) {
   }, 40);
 }
 
+type PubkeyLike = { toString: () => string; toBytes: () => Uint8Array };
+
+type WalletProvider = {
+  isSolflare?: boolean;
+  isPhantom?: boolean;
+  publicKey?: PubkeyLike | null;
+  connect: () => Promise<{ publicKey?: PubkeyLike } | void | undefined>;
+  signTransaction: (tx: unknown) => Promise<{ serialize: () => Uint8Array }>;
+  // Solflare supports signAndSendTransaction — bypasses its own preflight simulation
+  signAndSendTransaction?: (tx: unknown, opts?: { skipPreflight?: boolean }) => Promise<{ signature: string }>;
+};
+
+function getProvider(): WalletProvider | null {
+  const w = window as unknown as {
+    solflare?: WalletProvider;
+    solana?: WalletProvider;
+    phantom?: { solana?: WalletProvider };
+  };
+  return w.solflare ?? w.solana ?? w.phantom?.solana ?? null;
+}
+
+async function connectAndGetPk(provider: WalletProvider): Promise<string> {
+  const resp = await provider.connect();
+  // Solflare stores publicKey on provider after connect; others return it in the response
+  const pk = resp?.publicKey ?? provider.publicKey;
+  if (!pk) throw new Error("wallet connected but publicKey unavailable");
+  return pk.toString();
+}
+
 export function ContactView({ config, isActive }: Props) {
   const {
     emitJmp,
@@ -41,23 +107,76 @@ export function ContactView({ config, isActive }: Props) {
     setAuthed: ctxSetAuthed,
     triggerAtField,
   } = useNerv();
-  const [walletStatus, setWalletStatus] = useState<"idle" | "ok" | "err">(
-    "idle",
-  );
-  const [walletMsg, setWalletMsg] = useState("");
-  const [walletLinked, setWalletLinked] = useState(false);
-  const [classifiedOpen, setClassifiedOpen] = useState(false);
+
+  // Channels state
   const [pktVal, setPktVal] = useState(0);
   const [latVal, setLatVal] = useState(24);
-  const [sigBars, setSigBars] = useState([[3], [3], [3], [3], [3]]);
+  const [sigBars, setSigBars] = useState([[3], [3], [3], [3]]);
+
+  // Wallet / guestlist state
+  const [walletPk, setWalletPk] = useState<string | null>(null);
+  const [ownRecord, setOwnRecord] = useState<OverseerRecord | null>(null);
+  const [roster, setRoster] = useState<OverseerRecord[]>([]);
+  const [rosterLoaded, setRosterLoaded] = useState(false);
+
+  // Register form
+  const [showForm, setShowForm] = useState(false);
+
+  // Roster decrypt state
+  const [hoveredRoster, setHoveredRoster] = useState<number | null>(null);
+  const [decryptedRows, setDecryptedRows] = useState<boolean[]>([]);
+  const [rosterTexts, setRosterTexts] = useState<string[]>([]);
+  const animatingRef = useRef(new Set<number>());
+  const [codenameInput, setCodenameInput] = useState("");
+  const [messageInput, setMessageInput] = useState("");
+
+  // TX status
+  const [txStatus, setTxStatus] = useState<
+    "idle" | "pending" | "finalized" | "err"
+  >("idle");
+  const [txMsg, setTxMsg] = useState("");
+
+  // Genesis-only bootstrap
+  const [showBootstrap, setShowBootstrap] = useState(false);
+
+  // Classified
+  const [classifiedOpen, setClassifiedOpen] = useState(false);
   const clLineRef = useRef<HTMLSpanElement>(null);
   const clNoteRef = useRef<HTMLSpanElement>(null);
   const clResumeRef = useRef<HTMLAnchorElement>(null);
+
+  // Transmit
   const txMsgRef = useRef<HTMLTextAreaElement>(null);
   const txStatRef = useRef<HTMLSpanElement>(null);
+
   const c = config.contact;
 
-  // Live comms uplink updates
+  // Live uplink animation
+  const chans = [
+    {
+      k: "EMAIL",
+      v: c.email,
+      href: `mailto:${c.email}`,
+      sec: "OPEN",
+      port: "0x19",
+    },
+    {
+      k: "GITHUB",
+      v: c.github.replace(/^https?:\/\//, ""),
+      href: c.github,
+      sec: "SECURE",
+      port: "0x1BB",
+    },
+    {
+      k: "X",
+      v: c.x.replace(/^https?:\/\//, ""),
+      href: c.x,
+      sec: "SECURE",
+      port: "0x1BB",
+    },
+    { k: "DISCORD", v: c.discord, href: null, sec: "OPEN", port: "0x0D" },
+  ] as const;
+
   useEffect(() => {
     const id = setInterval(() => {
       setSigBars(chans.map(() => [3 + Math.floor(Math.random() * 3)]));
@@ -65,8 +184,57 @@ export function ContactView({ config, isActive }: Props) {
       setPktVal((v) => v + 1 + Math.floor(Math.random() * 40));
     }, 900);
     return () => clearInterval(id);
-  }, [sigBars]);
+  }, []);
 
+  // Fetch roster when view opens
+  useEffect(() => {
+    if (!isActive || rosterLoaded) return;
+    fetchRoster()
+      .then((r) => {
+        setRoster(r);
+        setRosterLoaded(true);
+      })
+      .catch(() => setRosterLoaded(true));
+  }, [isActive, rosterLoaded]);
+
+  // Initialise encrypted display texts when roster first loads
+  useEffect(() => {
+    if (roster.length === 0) return;
+    setDecryptedRows(new Array(roster.length).fill(false));
+    setRosterTexts(roster.map((r) => scrambleLine(rosterLine(r))));
+  }, [roster.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startDecrypt(idx: number) {
+    if (animatingRef.current.has(idx) || decryptedRows[idx]) return;
+    animatingRef.current.add(idx);
+    const target = rosterLine(roster[idx]);
+    const STEPS = 22;
+    let step = 0;
+    const id = setInterval(() => {
+      step++;
+      const resolved = Math.floor((target.length * step) / STEPS);
+      let out = "";
+      for (let i = 0; i < target.length; i++) {
+        if (target[i] === " " || target[i] === "/") {
+          out += target[i];
+          continue;
+        }
+        out +=
+          i < resolved
+            ? target[i]
+            : B58[Math.floor(Math.random() * B58.length)];
+      }
+      setRosterTexts((prev) => prev.map((t, i) => (i === idx ? out : t)));
+      if (step >= STEPS) {
+        clearInterval(id);
+        animatingRef.current.delete(idx);
+        setDecryptedRows((prev) => prev.map((d, i) => (i === idx ? true : d)));
+        setRosterTexts((prev) => prev.map((t, i) => (i === idx ? target : t)));
+      }
+    }, 42);
+  }
+
+  // ── Classified unlock ────────────────────────────────────────────────────────
   function unlockClassified() {
     const cf = config.classified;
     setClassifiedOpen(true);
@@ -81,76 +249,166 @@ export function ContactView({ config, isActive }: Props) {
     }, 50);
     emitJmp("CALL declassify   ; OVERSEER CLEARANCE GRANTED");
     flashStatus("DECLASSIFIED", false);
-    const statEl = document.getElementById("cl-stat");
-    if (statEl) statEl.textContent = "● DECRYPTED";
-    const lockEl = document.getElementById("cl-lockmsg");
-    if (lockEl) lockEl.style.display = "none";
   }
 
+  // ── Heartbeat ────────────────────────────────────────────────────────────────
+  async function doHeartbeat(
+    provider: WalletProvider,
+    authority: PublicKey,
+    record: OverseerRecord,
+  ) {
+    const [pda] = await findOverseerPDA(authority);
+    const tx = await buildHeartbeatTx(authority, pda);
+    const signed = (await provider.signTransaction(tx)) as {
+      serialize: () => Uint8Array;
+    };
+    await sendAndConfirm(signed.serialize());
+    // refresh own record
+    const updated = await fetchOverseerRecord(authority);
+    if (updated) {
+      setOwnRecord(updated);
+      setRoster((prev) => {
+        const idx = prev.findIndex((r) => r.authority === updated.authority);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = updated;
+          return next;
+        }
+        return prev;
+      });
+    }
+    emitJmp("CALL heartbeat   ; VISIT " + (record.visits + 1));
+    flashStatus("HEARTBEAT", false);
+  }
+
+  // ── Register ─────────────────────────────────────────────────────────────────
+  async function submitRegister() {
+    if (!codenameInput.trim() || !walletPk) return;
+    const provider = getProvider();
+    if (!provider) return;
+    const authority = new PublicKey(walletPk);
+    setTxStatus("pending");
+    setTxMsg("building transaction…");
+    try {
+      const { tx, debugHex } = await buildRegisterTx(
+        authority,
+        codenameInput.trim(),
+        messageInput.trim(),
+      );
+
+      // Run OUR simulation first — does this also return 0xC?
+      const { getConnection } = await import("@/lib/solana/guestlist");
+      const sim = await getConnection().simulateTransaction(tx, undefined, true);
+      const simLogs = sim.value.logs?.join(' | ') ?? 'no logs';
+      const simErr  = sim.value.err ? JSON.stringify(sim.value.err) : 'OK';
+      setTxMsg(`disc:${debugHex.slice(0, 2)} sim:${simErr} | ${simLogs.slice(0, 80)}`);
+      // Pause so you can read the message
+      await new Promise(r => setTimeout(r, 3000));
+
+      if (sim.value.err) {
+        throw new Error(`sim failed: ${simErr} | ${simLogs}`);
+      }
+
+      setTxMsg("sign in Solflare…");
+      const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
+      setTxMsg("waiting for finalized confirmation…");
+      const sig = await sendAndConfirm(signed.serialize());
+      setTxStatus("finalized");
+      setTxMsg("✓ registered · " + sig.slice(0, 8) + "…");
+      setShowForm(false);
+      emitJmp("CALL register   ; OVERSEER " + codenameInput.toUpperCase());
+      flashStatus("ENROLLED", false);
+      Sound.confirm();
+      const record = await fetchOverseerRecord(authority);
+      if (record) {
+        setOwnRecord(record);
+        setRoster((prev) => [record, ...prev]);
+      }
+      unlockClassified();
+      ctxSetAuthed(true);
+    } catch (e: unknown) {
+      console.error("[register]", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setTxStatus("err");
+      setTxMsg("✕ " + msg);
+      flashStatus("TX FAILED", true);
+      Sound.deny();
+    }
+  }
+
+  // ── Bootstrap (genesis only) ─────────────────────────────────────────────────
+  async function submitBootstrap() {
+    if (!walletPk) return;
+    const provider = getProvider();
+    if (!provider) return;
+    const authority = new PublicKey(walletPk);
+    setTxStatus("pending");
+    setTxMsg("bootstrapping COMMANDER clearance…");
+    try {
+      const tx = await buildBootstrapTx(authority);
+      setTxMsg("sign in Solflare…");
+      const signed = (await provider.signTransaction(tx)) as {
+        serialize: () => Uint8Array;
+      };
+      setTxMsg("waiting for finalized confirmation…");
+      const sig = await sendAndConfirm(signed.serialize());
+      setTxStatus("finalized");
+      setTxMsg("✓ COMMANDER clearance granted · " + sig.slice(0, 8) + "…");
+      setShowBootstrap(false);
+      emitJmp("CALL bootstrap   ; GENESIS ELEVATION COMPLETE");
+      flashStatus("COMMANDER", false);
+      Sound.confirm();
+      const updated = await fetchOverseerRecord(authority);
+      if (updated) setOwnRecord(updated);
+    } catch (e: unknown) {
+      setTxStatus("err");
+      setTxMsg("✕ " + (e instanceof Error ? e.message : "bootstrap failed"));
+      flashStatus("BOOTSTRAP ERR", true);
+      Sound.deny();
+    }
+  }
+
+  // ── Main wallet connect ───────────────────────────────────────────────────────
   async function connectWallet() {
     Sound.nav();
     triggerTribunal(
       "OVERSEER CREDENTIAL",
       async (ok) => {
         if (!ok) return;
-        const provider =
-          (
-            window as unknown as {
-              solana?: {
-                isPhantom?: boolean;
-                connect: () => Promise<{
-                  publicKey: { toString: () => string };
-                }>;
-              };
-              phantom?: {
-                solana?: {
-                  isPhantom?: boolean;
-                  connect: () => Promise<{
-                    publicKey: { toString: () => string };
-                  }>;
-                };
-              };
-            }
-          ).solana ||
-          (
-            window as unknown as {
-              phantom?: {
-                solana?: {
-                  isPhantom?: boolean;
-                  connect: () => Promise<{
-                    publicKey: { toString: () => string };
-                  }>;
-                };
-              };
-            }
-          ).phantom?.solana;
-        if (!provider?.isPhantom) {
-          setWalletStatus("err");
-          setWalletMsg(
-            "✕ NO INJECTED WALLET DETECTED — install Phantom to authenticate.",
-          );
-          flashStatus("AUTH FAILED", true);
+        const provider = getProvider();
+        if (!provider) {
+          flashStatus("NO WALLET", true);
           triggerAtField();
           Sound.deny();
+          setTxStatus("err");
+          setTxMsg("✕ Solflare not detected — install solflare.com");
           return;
         }
         try {
-          setWalletMsg("… requesting handshake");
-          const resp = await provider.connect();
-          const pk = resp.publicKey.toString();
-          const trunc = pk.slice(0, 4) + "…" + pk.slice(-4);
-          setWalletStatus("ok");
-          setWalletMsg("✓ OVERSEER VERIFIED — welcome, " + trunc);
-          setWalletLinked(true);
-          emitJmp("CALL auth   ; OVERSEER " + trunc);
-          flashStatus("AUTHENTICATED", false);
-          Sound.confirm();
-          unlockClassified();
-          ctxSetAuthed(true);
+          setTxMsg("connecting…");
+          const pk = await connectAndGetPk(provider);
+          setWalletPk(pk);
+          const authority = new PublicKey(pk);
+          setTxMsg("checking registry…");
+          const record = await fetchOverseerRecord(authority);
+          if (record) {
+            setOwnRecord(record);
+            setTxMsg("already enrolled — sending heartbeat…");
+            await doHeartbeat(provider, authority, record);
+            unlockClassified();
+            ctxSetAuthed(true);
+            // Show bootstrap button only for genesis wallet that hasn't been elevated yet
+            if (pk === GENESIS && record.clearance < 2) setShowBootstrap(true);
+          } else {
+            setTxMsg("");
+            setCodenameInput(pk.slice(0, 6).toUpperCase());
+            setShowForm(true);
+            flashStatus("REGISTER", false);
+          }
         } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : "connection denied";
-          setWalletStatus("err");
-          setWalletMsg("✕ HANDSHAKE REJECTED — " + msg);
+          console.error("[connect/heartbeat]", e);
+          setTxStatus("err");
+          setTxMsg("✕ " + (e instanceof Error ? e.message : String(e)));
           flashStatus("AUTH DENIED", true);
           triggerAtField();
           Sound.deny();
@@ -160,6 +418,7 @@ export function ContactView({ config, isActive }: Props) {
     );
   }
 
+  // ── Transmit form ────────────────────────────────────────────────────────────
   function transmit() {
     const msg = (txMsgRef.current?.value || "").trim();
     const st = txStatRef.current;
@@ -193,31 +452,7 @@ export function ContactView({ config, isActive }: Props) {
     flashStatus("COPIED", false);
   }
 
-  const chans = [
-    {
-      k: "EMAIL",
-      v: c.email,
-      href: `mailto:${c.email}`,
-      sec: "OPEN",
-      port: "0x19",
-    },
-    {
-      k: "GITHUB",
-      v: c.github.replace(/^https?:\/\//, ""),
-      href: c.github,
-      sec: "SECURE",
-      port: "0x1BB",
-    },
-    {
-      k: "X",
-      v: c.x.replace(/^https?:\/\//, ""),
-      href: c.x,
-      sec: "SECURE",
-      port: "0x1BB",
-    },
-    { k: "DISCORD", v: c.discord, href: null, sec: "OPEN", port: "0x0D" },
-  ] as const;
-
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <section className={`view${isActive ? " active" : ""}`} id="v-contact">
       <div className="view-title">CHANNELS</div>
@@ -225,6 +460,7 @@ export function ContactView({ config, isActive }: Props) {
         COMMS UPLINK <span className="jp">通信</span>
       </div>
 
+      {/* Uplink bar */}
       <div className="uplink-bar">
         <span>
           <span className="dot live" />
@@ -241,6 +477,7 @@ export function ContactView({ config, isActive }: Props) {
         </span>
       </div>
 
+      {/* Channels */}
       <div className="channels" id="channels">
         {chans.map((ch, i) => {
           const lit = sigBars[i]?.[0] ?? 3;
@@ -283,6 +520,7 @@ export function ContactView({ config, isActive }: Props) {
         })}
       </div>
 
+      {/* Transmit */}
       <div className="transmit">
         <div className="tx-top">
           <span className="l">
@@ -314,31 +552,151 @@ export function ContactView({ config, isActive }: Props) {
         </div>
       </div>
 
+      {/* Overseer Auth */}
       <div className="auth">
         <div className="ah">
           <span className="t">Overseer Authentication</span>
           <span className="jp">認証</span>
         </div>
         <p>
-          Optional. Connect an injected Solana wallet (Phantom) to verify
-          overseer credentials. No transaction is requested — read-only
-          handshake.
+          Connect Solflare to register on the{" "}
+          <a
+            href="https://github.com/rokoperki/rok0-guestlist"
+            target="_blank"
+            rel="noopener"
+            className="cl-dl"
+          >
+            rok0-guestlist
+          </a>{" "}
+          — a Solana program deployed on devnet, written in raw sBPF assembly.
+          Your codename and a message are stored on-chain as a PDA derived from
+          your wallet. Only rent required — no extra SOL. Curious about the
+          code?{" "}
+          <a
+            href="https://github.com/rokoperki/rok0-guestlist"
+            target="_blank"
+            rel="noopener"
+            className="cl-dl"
+          >
+            Read the source on GitHub ▸
+          </a>
         </p>
-        <button
-          id="wallet-btn"
-          className={walletLinked ? "linked" : ""}
-          onClick={connectWallet}
-        >
-          {walletLinked ? "AUTHENTICATED ✓" : "CONNECT WALLET"}
-        </button>
-        <div
-          className={`out${walletStatus === "ok" ? " ok" : walletStatus === "err" ? " err" : ""}`}
-          id="wallet-out"
-        >
-          {walletMsg}
-        </div>
+
+        {!walletPk && (
+          <button id="wallet-btn" onClick={connectWallet}>
+            CONNECT SOLFLARE
+          </button>
+        )}
+
+        {walletPk && !showForm && !ownRecord && (
+          <button className="linked">
+            CONNECTED {walletPk.slice(0, 4)}…{walletPk.slice(-4)}
+          </button>
+        )}
+
+        {/* TX status line */}
+        {txMsg && (
+          <div
+            className={`out${txStatus === "finalized" ? " ok" : txStatus === "err" ? " err" : ""}`}
+          >
+            {txMsg}
+          </div>
+        )}
+
+        {/* Register form */}
+        {showForm && (
+          <div className="register-form">
+            <div className="rf-row">
+              <label className="rf-label">CODENAME</label>
+              <input
+                className="rf-input"
+                maxLength={16}
+                placeholder="max 16 chars"
+                value={codenameInput}
+                onChange={(e) => setCodenameInput(e.target.value.toUpperCase())}
+                spellCheck={false}
+                autoFocus
+              />
+            </div>
+            <div className="rf-row">
+              <label className="rf-label">MESSAGE</label>
+              <textarea
+                className="rf-input"
+                rows={2}
+                maxLength={700}
+                placeholder="optional, max 700 chars"
+                value={messageInput}
+                onChange={(e) => setMessageInput(e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+            <div className="rf-actions">
+              <button
+                className="pbtn src"
+                onClick={submitRegister}
+                disabled={txStatus === "pending" || !codenameInput.trim()}
+              >
+                {txStatus === "pending" ? "⟳ PENDING…" : "▸ REGISTER ON-CHAIN"}
+              </button>
+              <button className="pbtn" onClick={() => setShowForm(false)}>
+                CANCEL
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Own record */}
+        {ownRecord && (
+          <div className="own-record">
+            <div className="or-head">
+              <span className="or-codename">{ownRecord.codename || "???"}</span>
+              <span
+                className={`st ${ownRecord.clearance === 2 ? "run" : ownRecord.clearance === 1 ? "sync" : "halt"}`}
+              >
+                {CLEARANCE_LABELS[ownRecord.clearance]}
+              </span>
+            </div>
+            <div className="or-meta">
+              <span>
+                visits <b>{ownRecord.visits}</b>
+              </span>
+              <span>enrolled {relativeTime(ownRecord.enrolledAt)}</span>
+              <span>last seen {relativeTime(ownRecord.lastSeen)}</span>
+            </div>
+            {ownRecord.message && (
+              <div className="or-msg">"{ownRecord.message}"</div>
+            )}
+          </div>
+        )}
+
+        {/* Bootstrap — genesis only, hidden from everyone else */}
+        {showBootstrap && (
+          <div
+            className="auth"
+            style={{ borderColor: "var(--accent)", marginTop: "14px" }}
+          >
+            <div className="ah">
+              <span className="t">Genesis Bootstrap</span>
+              <span className="jp">初期化</span>
+            </div>
+            <p>
+              Your wallet matches the genesis authority hardcoded in the
+              program. Call <b>bootstrap()</b> once to elevate your record to
+              COMMANDER clearance.
+            </p>
+            <button
+              className="pbtn demo"
+              onClick={submitBootstrap}
+              disabled={txStatus === "pending"}
+              style={{ marginTop: "8px" }}
+            >
+              {txStatus === "pending" ? "⟳ PENDING…" : "▸ BOOTSTRAP COMMANDER"}
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Classified */}
       <div
         className={`classified ${classifiedOpen ? "unlocked" : "locked"}`}
         id="classified"
@@ -375,10 +733,91 @@ export function ContactView({ config, isActive }: Props) {
           </div>
           {!classifiedOpen && (
             <div className="cl-lockmsg" id="cl-lockmsg">
-              // AUTHENTICATE VIA OVERSEER WALLET TO DECRYPT THIS RECORD
+              // AUTHENTICATE VIA OVERSEER WALLET TO DECRYPT
             </div>
           )}
         </div>
+      </div>
+
+      {/* Roster */}
+      <div className="roster">
+        <div
+          className="sec-head"
+          style={{
+            margin: "-0px 0 12px",
+            background: "transparent",
+            borderBottom: "1px solid var(--line)",
+          }}
+        >
+          <h2>Overseer Roster</h2>
+          <span className="jp">登録者</span>
+        </div>
+
+        {!rosterLoaded && (
+          <div className="roster-loading">fetching registry…</div>
+        )}
+
+        {rosterLoaded && roster.length === 0 && (
+          <div className="roster-empty">
+            // NO OVERSEERS ENROLLED YET — BE THE FIRST
+          </div>
+        )}
+
+        {rosterLoaded && roster.length > 0 && (
+          <div className="rc-list">
+            {roster.map((r, i) => {
+              const isDecrypted = decryptedRows[i] ?? false;
+              const isHovered = hoveredRoster === i;
+              return (
+                <div
+                  key={r.pubkey}
+                  className={`rc-entry${r.authority === walletPk ? " rc-self" : ""}${isDecrypted ? " rc-unlocked" : ""}`}
+                  onMouseEnter={() => {
+                    setHoveredRoster(i);
+                    startDecrypt(i);
+                  }}
+                  onMouseLeave={() => setHoveredRoster(null)}
+                >
+                  <span className="rc-idx">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  {/* Show full decoded view only after decrypt + hover */}
+                  {isDecrypted && isHovered ? (
+                    <div className="rc-decoded">
+                      <div className="rc-head">
+                        <span className="rc-codename">
+                          {r.codename || "???"}
+                        </span>
+                        <span
+                          className={`st ${r.clearance === 2 ? "run" : r.clearance === 1 ? "sync" : "halt"}`}
+                        >
+                          {CLEARANCE_LABELS[r.clearance]}
+                        </span>
+                        <span className="rc-visits">
+                          visits <b>{r.visits}</b>
+                        </span>
+                        <span className="rc-time">
+                          {relativeTime(r.lastSeen)}
+                        </span>
+                      </div>
+                      {r.message && (
+                        <div className="rc-msg">
+                          &ldquo;{r.message.slice(0, 160)}
+                          {r.message.length > 160 ? "…" : ""}&rdquo;
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Encrypted (scrambling) or decrypted single-line */
+                    <div className={isDecrypted ? "rc-line" : "rc-raw"}>
+                      {rosterTexts[i] ?? scrambleLine(rosterLine(r))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </section>
   );
