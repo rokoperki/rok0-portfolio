@@ -3308,11 +3308,27 @@ body.corrupt .corrupt-banner {
 
 /* Mobile: viewport fills full width, tabs select sections directly */
 @media (max-width: 900px) {
+    /* Switch from fixed-height app layout to natural page scroll */
     body {
         font-size: 13px;
+        overflow-y: auto;
+    }
+    #console {
+        height: auto;
+        min-height: 100vh;
     }
     .body {
         grid-template-columns: 1fr;
+        flex: none;
+    }
+    .center {
+        overflow: visible;
+        height: auto;
+    }
+    .vp {
+        overflow-y: visible;
+        flex: none;
+        height: auto;
     }
     /* Both sidebars hidden — nav is replaced by section tabs */
     .left,
