@@ -372,7 +372,9 @@ export function ContactView({ config, isActive }: Props) {
             setShowForm(false);
             setWalletPk(null);
             const provider = getProvider();
-            try { await provider?.disconnect?.(); } catch {}
+            try {
+              await provider?.disconnect?.();
+            } catch {}
           }
           emitJmp(
             "CALL deregister   ; " +
@@ -458,7 +460,11 @@ export function ContactView({ config, isActive }: Props) {
     setTxStatus("pending");
     setTxMsg("building update transaction…");
     try {
-      const tx = await buildUpdateMessageTx(authority, editMsgInput.trim(), ownRecord?.message ?? '');
+      const tx = await buildUpdateMessageTx(
+        authority,
+        editMsgInput.trim(),
+        ownRecord?.message ?? "",
+      );
       setTxMsg("sign in Solflare…");
       const signed = (await provider.signTransaction(tx)) as {
         serialize: () => Uint8Array;
@@ -695,7 +701,8 @@ export function ContactView({ config, isActive }: Props) {
           <span className="jp">認証</span>
         </div>
         <p>
-          Connect Solflare to register on the{" "}
+          This is a live Solana program — written in raw sBPF assembly, deployed
+          on devnet. Connect your Solflare wallet to register on the{" "}
           <a
             href="https://github.com/rokoperki/rok0-guestlist"
             target="_blank"
@@ -703,18 +710,19 @@ export function ContactView({ config, isActive }: Props) {
             className="cl-dl"
           >
             rok0-guestlist
-          </a>{" "}
-          — a Solana program deployed on devnet, written in raw sBPF assembly.
-          Your codename and a message are stored on-chain as a PDA derived from
-          your wallet. Only rent required — no extra SOL. Curious about the
-          code?{" "}
+          </a>
+          . Pick a codename, leave a message, and your record is stored on-chain
+          as a PDA keyed to your wallet — permanent, verifiable, yours. No
+          tokens, no fees beyond the small rent deposit (~0.002 SOL) that you
+          get back on deregister. Clearance starts at OPERATIVE; commanders can
+          promote.{" "}
           <a
             href="https://github.com/rokoperki/rok0-guestlist"
             target="_blank"
             rel="noopener"
             className="cl-dl"
           >
-            Read the source on GitHub ▸
+            Read the source ▸
           </a>
         </p>
 
@@ -1070,7 +1078,7 @@ export function ContactView({ config, isActive }: Props) {
             </div>
             {!classifiedOpen && (
               <div className="cl-lockmsg" id="cl-lockmsg">
-                // AUTHENTICATE VIA OVERSEER WALLET TO DECRYPT
+                // AUTHENTICATE VIA GUESTBOOK WALLET TO DECRYPT
               </div>
             )}
           </div>

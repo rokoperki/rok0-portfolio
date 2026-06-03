@@ -6,7 +6,7 @@ export const CONFIG: Config = {
   role: "Solana · Web3 developer",
 
   about:
-    "Rust developer from Split, Croatia working at the bottom of the Solana stack. I write sBPF assembly programs that fit in 3 KB and cost 118 CU — then build the React frontend and Nest.js backend that make them usable. Full-stack from ELF bytecode to Tailwind. Currently Rust dev at Solbound.dev.",
+    "Systems engineer operating out of Split, Croatia. I work at the instruction level — raw sBPF assembly when compute units are the constraint, Pinocchio and Anchor when they aren't. The machine doesn't lie: binary size, CU consumption, and account layout tell you exactly how well a program is written.\nWhen the protocol needs a face I build that too. APIs, frontends, databases — whatever bridges the on-chain logic to the people using it. I don't stop at the program boundary.\n\nCurrently Rust dev at Solbound.dev. Always building.",
 
   aboutMeta: [
     { k: "Class", v: "Systems / Protocol" },
