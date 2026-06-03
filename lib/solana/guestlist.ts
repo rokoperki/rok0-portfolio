@@ -79,53 +79,34 @@ export async function buildRegisterTx(
   authority: PublicKey,
   codename: string,
   message: string,
-): Promise<{ tx: Transaction; debugHex: string }> {
+): Promise<{ tx: Transaction }> {
   const conn = getConnection();
   const [pda, bump] = await findOverseerPDA(authority);
 
   const codenameBytes = new Uint8Array(16);
-  const encoded = new TextEncoder().encode(codename.slice(0, 16));
-  codenameBytes.set(encoded);
+  new TextEncoder().encode(codename.slice(0, 16)).forEach((b, i) => { codenameBytes[i] = b; });
 
-  const msgBytes  = new TextEncoder().encode(message.slice(0, 700));
-  const lamports  = await conn.getMinimumBalanceForRentExemption(HEADER_SIZE + msgBytes.length, 'finalized');
+  const msgBytes = new TextEncoder().encode(message.slice(0, 700));
+  const lamports = await conn.getMinimumBalanceForRentExemption(HEADER_SIZE + msgBytes.length, 'finalized');
 
-  // Build LE u64 for lamports without DataView to avoid any polyfill issues
   const lamBytes = new Uint8Array(8);
-  const lamDv = new DataView(lamBytes.buffer);
-  lamDv.setBigUint64(0, BigInt(lamports), true /* little-endian */);
+  new DataView(lamBytes.buffer).setBigUint64(0, BigInt(lamports), true);
 
-  // Build LE u16 for msg_len
   const msgLenBytes = new Uint8Array(2);
   msgLenBytes[0] = msgBytes.length & 0xff;
   msgLenBytes[1] = (msgBytes.length >> 8) & 0xff;
 
-  // Concatenate all fields explicitly — no DataView, no alignment surprises
-  const parts = [
-    new Uint8Array([0]),          // discriminator = IX_REGISTER
-    codenameBytes,                // 16 bytes
-    new Uint8Array([bump]),       // 1 byte
-    lamBytes,                     // 8 bytes LE
-    msgLenBytes,                  // 2 bytes LE
-    msgBytes,                     // 0-700 bytes
-  ];
-  const totalLen = parts.reduce((s, p) => s + p.length, 0);
-  const data = new Uint8Array(totalLen);
+  const parts = [new Uint8Array([0]), codenameBytes, new Uint8Array([bump]), lamBytes, msgLenBytes, msgBytes];
+  const data = new Uint8Array(parts.reduce((s, p) => s + p.length, 0));
   let pos = 0;
   for (const p of parts) { data.set(p, pos); pos += p.length; }
-
-  const hexStr = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
-  console.log('[register] pda:', pda.toBase58(), 'bump:', bump, 'lamports:', lamports);
-  console.log('[register] ix data (first 28 bytes):', hexStr.slice(0, 56));
-  // byte 0 must be 00 (IX_REGISTER), bytes 1-16 = codename, byte 17 = bump
-  if (data[0] !== 0) console.error('[register] BUG: discriminator is', data[0], 'not 0!');
 
   const ix = new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
-      { pubkey: authority,                isSigner: true,  isWritable: true  },
-      { pubkey: pda,                      isSigner: false, isWritable: true  },
-      { pubkey: SystemProgram.programId,  isSigner: false, isWritable: false },
+      { pubkey: authority,               isSigner: true,  isWritable: true  },
+      { pubkey: pda,                     isSigner: false, isWritable: true  },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
     data: Buffer.from(data),
   });
@@ -133,7 +114,7 @@ export async function buildRegisterTx(
   const { blockhash } = await conn.getLatestBlockhash('finalized');
   const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority });
   tx.add(ix);
-  return { tx, debugHex: hexStr };
+  return { tx };
 }
 
 export async function buildHeartbeatTx(
@@ -195,26 +176,46 @@ export async function buildPromoteTx(
 export async function buildUpdateMessageTx(
   authority: PublicKey,
   newMessage: string,
+  currentMessage = '',
 ): Promise<Transaction> {
   const conn = getConnection();
   const [pda] = await findOverseerPDA(authority);
-  const msgBytes = new TextEncoder().encode(newMessage.slice(0, 700));
-  const data = new Uint8Array(1 + 2 + msgBytes.length);
+
+  const newMsgBytes = new TextEncoder().encode(newMessage.slice(0, 700));
+  const oldMsgBytes = new TextEncoder().encode(currentMessage);
+
+  // If the new message is longer the PDA account must grow — top up its rent
+  const newSize = HEADER_SIZE + newMsgBytes.length;
+  const oldSize = HEADER_SIZE + oldMsgBytes.length;
+  const [newRent, oldRent] = await Promise.all([
+    conn.getMinimumBalanceForRentExemption(newSize, 'finalized'),
+    conn.getMinimumBalanceForRentExemption(oldSize, 'finalized'),
+  ]);
+  const extraLamports = Math.max(0, newRent - oldRent);
+
+  const data = new Uint8Array(1 + 2 + newMsgBytes.length);
   data[0] = 5; // IX_UPDATE_MESSAGE
-  data[1] = msgBytes.length & 0xff;
-  data[2] = (msgBytes.length >> 8) & 0xff;
-  data.set(msgBytes, 3);
-  const ix = new TransactionInstruction({
+  data[1] = newMsgBytes.length & 0xff;
+  data[2] = (newMsgBytes.length >> 8) & 0xff;
+  data.set(newMsgBytes, 3);
+
+  const { blockhash } = await conn.getLatestBlockhash('finalized');
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority });
+
+  // Prepend a transfer to cover extra rent when growing the account
+  if (extraLamports > 0) {
+    tx.add(SystemProgram.transfer({ fromPubkey: authority, toPubkey: pda, lamports: extraLamports }));
+  }
+
+  tx.add(new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
       { pubkey: authority, isSigner: true,  isWritable: false },
       { pubkey: pda,       isSigner: false, isWritable: true  },
     ],
     data: Buffer.from(data),
-  });
-  const { blockhash } = await conn.getLatestBlockhash('finalized');
-  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority });
-  tx.add(ix);
+  }));
+
   return tx;
 }
 

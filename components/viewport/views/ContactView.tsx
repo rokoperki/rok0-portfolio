@@ -81,7 +81,10 @@ type WalletProvider = {
   connect: () => Promise<{ publicKey?: PubkeyLike } | void | undefined>;
   signTransaction: (tx: unknown) => Promise<{ serialize: () => Uint8Array }>;
   // Solflare supports signAndSendTransaction — bypasses its own preflight simulation
-  signAndSendTransaction?: (tx: unknown, opts?: { skipPreflight?: boolean }) => Promise<{ signature: string }>;
+  signAndSendTransaction?: (
+    tx: unknown,
+    opts?: { skipPreflight?: boolean },
+  ) => Promise<{ signature: string }>;
   disconnect?: () => Promise<void>;
 };
 
@@ -125,7 +128,7 @@ export function ContactView({ config, isActive }: Props) {
   // Register form
   const [showForm, setShowForm] = useState(false);
   const [editingMsg, setEditingMsg] = useState(false);
-  const [editMsgInput, setEditMsgInput] = useState('');
+  const [editMsgInput, setEditMsgInput] = useState("");
 
   // Roster decrypt state
   const [hoveredRoster, setHoveredRoster] = useState<number | null>(null);
@@ -140,7 +143,6 @@ export function ContactView({ config, isActive }: Props) {
     "idle" | "pending" | "finalized" | "err"
   >("idle");
   const [txMsg, setTxMsg] = useState("");
-
 
   // Classified
   const [classifiedOpen, setClassifiedOpen] = useState(false);
@@ -293,27 +295,15 @@ export function ContactView({ config, isActive }: Props) {
     setTxStatus("pending");
     setTxMsg("building transaction…");
     try {
-      const { tx, debugHex } = await buildRegisterTx(
+      const { tx } = await buildRegisterTx(
         authority,
         codenameInput.trim(),
         messageInput.trim(),
       );
-
-      // Run OUR simulation first — does this also return 0xC?
-      const { getConnection } = await import("@/lib/solana/guestlist");
-      const sim = await getConnection().simulateTransaction(tx, undefined, true);
-      const simLogs = sim.value.logs?.join(' | ') ?? 'no logs';
-      const simErr  = sim.value.err ? JSON.stringify(sim.value.err) : 'OK';
-      setTxMsg(`disc:${debugHex.slice(0, 2)} sim:${simErr} | ${simLogs.slice(0, 80)}`);
-      // Pause so you can read the message
-      await new Promise(r => setTimeout(r, 3000));
-
-      if (sim.value.err) {
-        throw new Error(`sim failed: ${simErr} | ${simLogs}`);
-      }
-
       setTxMsg("sign in Solflare…");
-      const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
+      const signed = (await provider.signTransaction(tx)) as {
+        serialize: () => Uint8Array;
+      };
       setTxMsg("waiting for finalized confirmation…");
       const sig = await sendAndConfirm(signed.serialize());
       setTxStatus("finalized");
@@ -353,8 +343,8 @@ export function ContactView({ config, isActive }: Props) {
       async (ok) => {
         if (!ok) return;
         const authority = new PublicKey(walletPk);
-        setTxStatus('pending');
-        setTxMsg('building deregister transaction…');
+        setTxStatus("pending");
+        setTxMsg("building deregister transaction…");
         try {
           let tx;
           if (isSelf) {
@@ -366,22 +356,37 @@ export function ContactView({ config, isActive }: Props) {
               new PublicKey(r.pubkey),
             );
           }
-          setTxMsg('sign in Solflare…');
-          const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
-          setTxMsg('waiting for finalized confirmation…');
+          setTxMsg("sign in Solflare…");
+          const signed = (await provider.signTransaction(tx)) as {
+            serialize: () => Uint8Array;
+          };
+          setTxMsg("waiting for finalized confirmation…");
           const sig = await sendAndConfirm(signed.serialize());
-          setTxStatus('finalized');
-          setTxMsg('✓ deregistered · ' + sig.slice(0, 8) + '…');
-          setRoster(prev => prev.filter((_, i) => i !== rosterIdx));
-          if (isSelf) { setOwnRecord(null); setClassifiedOpen(false); ctxSetAuthed(false); }
-          emitJmp('CALL deregister   ; ' + (r.codename || r.authority.slice(0, 8)).toUpperCase());
-          flashStatus('DEREGISTERED', false);
+          setTxStatus("finalized");
+          setTxMsg("✓ deregistered · " + sig.slice(0, 8) + "…");
+          setRoster((prev) => prev.filter((_, i) => i !== rosterIdx));
+          if (isSelf) {
+            setOwnRecord(null);
+            setClassifiedOpen(false);
+            ctxSetAuthed(false);
+            setShowForm(false);
+            setWalletPk(null);
+            const provider = getProvider();
+            try { await provider?.disconnect?.(); } catch {}
+          }
+          emitJmp(
+            "CALL deregister   ; " +
+              (r.codename || r.authority.slice(0, 8)).toUpperCase(),
+          );
+          flashStatus("DEREGISTERED", false);
           Sound.confirm();
         } catch (e: unknown) {
-          console.error('[deregister]', e);
-          setTxStatus('err');
-          setTxMsg('✕ ' + (e instanceof Error ? e.message : 'deregister failed'));
-          flashStatus('DEREG FAILED', true);
+          console.error("[deregister]", e);
+          setTxStatus("err");
+          setTxMsg(
+            "✕ " + (e instanceof Error ? e.message : "deregister failed"),
+          );
+          flashStatus("DEREG FAILED", true);
           Sound.deny();
         }
       },
@@ -401,8 +406,8 @@ export function ContactView({ config, isActive }: Props) {
       async (ok) => {
         if (!ok) return;
         const commander = new PublicKey(walletPk);
-        setTxStatus('pending');
-        setTxMsg('building promote transaction…');
+        setTxStatus("pending");
+        setTxMsg("building promote transaction…");
         try {
           const tx = await buildPromoteTx(
             commander,
@@ -410,27 +415,33 @@ export function ContactView({ config, isActive }: Props) {
             new PublicKey(r.pubkey),
             new PublicKey(r.authority),
           );
-          setTxMsg('sign in Solflare…');
-          const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
-          setTxMsg('waiting for finalized confirmation…');
+          setTxMsg("sign in Solflare…");
+          const signed = (await provider.signTransaction(tx)) as {
+            serialize: () => Uint8Array;
+          };
+          setTxMsg("waiting for finalized confirmation…");
           const sig = await sendAndConfirm(signed.serialize());
-          setTxStatus('finalized');
-          setTxMsg('✓ promoted · ' + sig.slice(0, 8) + '…');
+          setTxStatus("finalized");
+          setTxMsg("✓ promoted · " + sig.slice(0, 8) + "…");
           // Update clearance in roster
-          setRoster(prev => prev.map((rec, i) =>
-            i === rosterIdx ? { ...rec, clearance: 1 as const } : rec,
-          ));
+          setRoster((prev) =>
+            prev.map((rec, i) =>
+              i === rosterIdx ? { ...rec, clearance: 1 as const } : rec,
+            ),
+          );
           // Update decrypted text for this row
           const updated = { ...r, clearance: 1 as const };
-          setRosterTexts(prev => prev.map((t, i) => i === rosterIdx ? rosterLine(updated) : t));
+          setRosterTexts((prev) =>
+            prev.map((t, i) => (i === rosterIdx ? rosterLine(updated) : t)),
+          );
           emitJmp(`CALL promote   ; ${r.codename.toUpperCase()} → OVERSEER`);
-          flashStatus('PROMOTED', false);
+          flashStatus("PROMOTED", false);
           Sound.confirm();
         } catch (e: unknown) {
-          console.error('[promote]', e);
-          setTxStatus('err');
-          setTxMsg('✕ ' + (e instanceof Error ? e.message : 'promote failed'));
-          flashStatus('PROMOTE FAILED', true);
+          console.error("[promote]", e);
+          setTxStatus("err");
+          setTxMsg("✕ " + (e instanceof Error ? e.message : "promote failed"));
+          flashStatus("PROMOTE FAILED", true);
           Sound.deny();
         }
       },
@@ -444,31 +455,35 @@ export function ContactView({ config, isActive }: Props) {
     const provider = getProvider();
     if (!provider) return;
     const authority = new PublicKey(walletPk);
-    setTxStatus('pending');
-    setTxMsg('building update transaction…');
+    setTxStatus("pending");
+    setTxMsg("building update transaction…");
     try {
-      const tx = await buildUpdateMessageTx(authority, editMsgInput.trim());
-      setTxMsg('sign in Solflare…');
-      const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
-      setTxMsg('waiting for finalized confirmation…');
+      const tx = await buildUpdateMessageTx(authority, editMsgInput.trim(), ownRecord?.message ?? '');
+      setTxMsg("sign in Solflare…");
+      const signed = (await provider.signTransaction(tx)) as {
+        serialize: () => Uint8Array;
+      };
+      setTxMsg("waiting for finalized confirmation…");
       const sig = await sendAndConfirm(signed.serialize());
-      setTxStatus('finalized');
-      setTxMsg('✓ message updated · ' + sig.slice(0, 8) + '…');
+      setTxStatus("finalized");
+      setTxMsg("✓ message updated · " + sig.slice(0, 8) + "…");
       const newMsg = editMsgInput.trim();
-      setOwnRecord(prev => prev ? { ...prev, message: newMsg } : prev);
-      setRoster(prev => prev.map(r =>
-        r.authority === walletPk ? { ...r, message: newMsg } : r,
-      ));
+      setOwnRecord((prev) => (prev ? { ...prev, message: newMsg } : prev));
+      setRoster((prev) =>
+        prev.map((r) =>
+          r.authority === walletPk ? { ...r, message: newMsg } : r,
+        ),
+      );
       setEditingMsg(false);
-      setEditMsgInput('');
-      emitJmp('CALL update_msg   ; MESSAGE UPDATED');
-      flashStatus('MSG UPDATED', false);
+      setEditMsgInput("");
+      emitJmp("CALL update_msg   ; MESSAGE UPDATED");
+      flashStatus("MSG UPDATED", false);
       Sound.confirm();
     } catch (e: unknown) {
-      console.error('[update_msg]', e);
-      setTxStatus('err');
-      setTxMsg('✕ ' + (e instanceof Error ? e.message : 'update failed'));
-      flashStatus('UPDATE FAILED', true);
+      console.error("[update_msg]", e);
+      setTxStatus("err");
+      setTxMsg("✕ " + (e instanceof Error ? e.message : "update failed"));
+      flashStatus("UPDATE FAILED", true);
       Sound.deny();
     }
   }
@@ -476,16 +491,18 @@ export function ContactView({ config, isActive }: Props) {
   // ── Disconnect ────────────────────────────────────────────────────────────────
   async function disconnectWallet() {
     const provider = getProvider();
-    try { await provider?.disconnect?.(); } catch {}
+    try {
+      await provider?.disconnect?.();
+    } catch {}
     setWalletPk(null);
     setOwnRecord(null);
     setClassifiedOpen(false);
     setShowForm(false);
-    setTxStatus('idle');
-    setTxMsg('');
+    setTxStatus("idle");
+    setTxMsg("");
     ctxSetAuthed(false);
-    emitJmp('CALL disconnect   ; SESSION TERMINATED');
-    flashStatus('DISCONNECTED', false);
+    emitJmp("CALL disconnect   ; SESSION TERMINATED");
+    flashStatus("DISCONNECTED", false);
   }
 
   // ── Main wallet connect ───────────────────────────────────────────────────────
@@ -674,7 +691,7 @@ export function ContactView({ config, isActive }: Props) {
       {/* Overseer Auth */}
       <div className="auth">
         <div className="ah">
-          <span className="t">Overseer Authentication</span>
+          <span className="t">Guestbook Authentication</span>
           <span className="jp">認証</span>
         </div>
         <p>
@@ -716,7 +733,13 @@ export function ContactView({ config, isActive }: Props) {
         {walletPk && (
           <button
             className="pbtn"
-            style={{ marginTop: '10px', fontSize: '12px', padding: '6px 14px', borderColor: 'var(--dim)', color: 'var(--dim2)' }}
+            style={{
+              marginTop: "10px",
+              fontSize: "12px",
+              padding: "6px 14px",
+              borderColor: "var(--dim)",
+              color: "var(--dim2)",
+            }}
             onClick={disconnectWallet}
           >
             ▸ DISCONNECT
@@ -796,7 +819,7 @@ export function ContactView({ config, isActive }: Props) {
               <div className="or-msg">"{ownRecord.message}"</div>
             )}
             {editingMsg ? (
-              <div className="register-form" style={{ marginTop: '10px' }}>
+              <div className="register-form" style={{ marginTop: "10px" }}>
                 <div className="rf-row">
                   <label className="rf-label">NEW MESSAGE</label>
                   <textarea
@@ -804,7 +827,7 @@ export function ContactView({ config, isActive }: Props) {
                     rows={2}
                     maxLength={700}
                     value={editMsgInput}
-                    onChange={e => setEditMsgInput(e.target.value)}
+                    onChange={(e) => setEditMsgInput(e.target.value)}
                     placeholder="max 700 chars"
                     spellCheck={false}
                     autoFocus
@@ -814,11 +837,19 @@ export function ContactView({ config, isActive }: Props) {
                   <button
                     className="pbtn src"
                     onClick={submitUpdateMessage}
-                    disabled={txStatus === 'pending' || !editMsgInput.trim()}
+                    disabled={txStatus === "pending" || !editMsgInput.trim()}
                   >
-                    {txStatus === 'pending' ? '⟳ PENDING…' : '▸ UPDATE ON-CHAIN'}
+                    {txStatus === "pending"
+                      ? "⟳ PENDING…"
+                      : "▸ UPDATE ON-CHAIN"}
                   </button>
-                  <button className="pbtn" onClick={() => { setEditingMsg(false); setEditMsgInput(''); }}>
+                  <button
+                    className="pbtn"
+                    onClick={() => {
+                      setEditingMsg(false);
+                      setEditMsgInput("");
+                    }}
+                  >
                     CANCEL
                   </button>
                 </div>
@@ -826,58 +857,22 @@ export function ContactView({ config, isActive }: Props) {
             ) : (
               <button
                 className="backbtn"
-                style={{ fontSize: '11px', padding: '3px 12px', marginTop: '8px', display: 'inline-block' }}
-                onClick={() => { setEditingMsg(true); setEditMsgInput(ownRecord.message); }}
+                style={{
+                  fontSize: "11px",
+                  padding: "3px 12px",
+                  marginTop: "8px",
+                  display: "inline-block",
+                }}
+                onClick={() => {
+                  setEditingMsg(true);
+                  setEditMsgInput(ownRecord.message);
+                }}
               >
-                ▸ {ownRecord.message ? 'EDIT MESSAGE' : 'ADD MESSAGE'}
+                ▸ {ownRecord.message ? "EDIT MESSAGE" : "ADD MESSAGE"}
               </button>
             )}
           </div>
         )}
-
-      </div>
-
-      {/* Classified */}
-      <div
-        className={`classified ${classifiedOpen ? "unlocked" : "locked"}`}
-        id="classified"
-      >
-        <div className="cl-head">
-          <span className="t">OVERSEER · EYES ONLY</span>
-          <span className="jp">機密</span>
-          <span className="cl-stat" id="cl-stat">
-            {classifiedOpen ? "● DECRYPTED" : "● LOCKED"}
-          </span>
-        </div>
-        <div className="cl-body">
-          <div className="cl-row">
-            <span className="cl-k">DIRECT LINE</span>
-            <span className="cl-v" id="cl-line" ref={clLineRef}>
-              {classifiedOpen ? "" : "████████████████"}
-            </span>
-          </div>
-          <div className="cl-row">
-            <span className="cl-k">DOSSIER</span>
-            <span className="cl-v">
-              <a id="cl-resume" className="cl-dl" ref={clResumeRef}>
-                {classifiedOpen ? "" : "████████████████"}
-              </a>
-            </span>
-          </div>
-          <div className="cl-row note">
-            <span className="cl-k">NOTE</span>
-            <span className="cl-v" id="cl-note" ref={clNoteRef}>
-              {classifiedOpen
-                ? ""
-                : "█████████ ████ ████████ ██ ████ ████ ████████ ████ ███ █████ ████."}
-            </span>
-          </div>
-          {!classifiedOpen && (
-            <div className="cl-lockmsg" id="cl-lockmsg">
-              // AUTHENTICATE VIA OVERSEER WALLET TO DECRYPT
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Roster */}
@@ -901,13 +896,30 @@ export function ContactView({ config, isActive }: Props) {
         {/* Rank legend */}
         <div className="roster-ranks">
           {[
-            { color: 'var(--accent)',  label: 'OPERATIVE',  desc: 'newly enrolled — wallet verified on-chain' },
-            { color: 'var(--amber)',   label: 'OVERSEER',   desc: 'elevated by commander' },
-            { color: 'var(--cyan)',    label: 'COMMANDER',  desc: 'genesis authority — program deployer' },
+            {
+              color: "var(--accent)",
+              label: "OPERATIVE",
+              desc: "newly enrolled — wallet verified on-chain",
+            },
+            {
+              color: "var(--amber)",
+              label: "OVERSEER",
+              desc: "elevated by commander",
+            },
+            {
+              color: "var(--cyan)",
+              label: "COMMANDER",
+              desc: "genesis authority — program deployer",
+            },
           ].map(({ color, label, desc }) => (
             <div className="rr-item" key={label}>
-              <span className="rr-dot" style={{ background: color, boxShadow: `0 0 5px ${color}` }} />
-              <span className="rr-label" style={{ color }}>{label}</span>
+              <span
+                className="rr-dot"
+                style={{ background: color, boxShadow: `0 0 5px ${color}` }}
+              />
+              <span className="rr-label" style={{ color }}>
+                {label}
+              </span>
               <span className="rr-desc">— {desc}</span>
             </div>
           ))}
@@ -957,40 +969,62 @@ export function ContactView({ config, isActive }: Props) {
                         </span>
                       </div>
                       {r.message && (
-                        <div className="rc-msg">
-                          &ldquo;{r.message}&rdquo;
-                        </div>
+                        <div className="rc-msg">&ldquo;{r.message}&rdquo;</div>
                       )}
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          marginTop: "8px",
+                          flexWrap: "wrap",
+                        }}
+                      >
                         {/* Promote — commander only, on OPERATIVE rows that aren't self */}
-                        {walletPk && ownRecord?.clearance === 2 && r.clearance === 0 && r.authority !== walletPk && (
-                          <button
-                            className="backbtn"
-                            style={{ fontSize: '11px', padding: '3px 12px', borderColor: 'var(--cyan)', color: 'var(--cyan)' }}
-                            onClick={(e) => { e.stopPropagation(); submitPromote(i); }}
-                          >
-                            ▸ PROMOTE
-                          </button>
-                        )}
+                        {walletPk &&
+                          ownRecord?.clearance === 2 &&
+                          r.clearance === 0 &&
+                          r.authority !== walletPk && (
+                            <button
+                              className="backbtn"
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 12px",
+                                borderColor: "var(--cyan)",
+                                color: "var(--cyan)",
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                submitPromote(i);
+                              }}
+                            >
+                              ▸ PROMOTE
+                            </button>
+                          )}
                         {/* Deregister — own record (non-commander) OR commander deregistering others */}
-                        {walletPk && (
-                          (r.authority === walletPk && (ownRecord?.clearance ?? 0) < 2) ||
-                          (ownRecord?.clearance === 2 && r.authority !== walletPk)
-                        ) && (
-                          <button
-                            className="backbtn"
-                            style={{ fontSize: '11px', padding: '3px 12px' }}
-                            onClick={(e) => { e.stopPropagation(); submitDeregister(i); }}
-                          >
-                            ▸ DEREGISTER
-                          </button>
-                        )}
+                        {walletPk &&
+                          ((r.authority === walletPk &&
+                            (ownRecord?.clearance ?? 0) < 2) ||
+                            (ownRecord?.clearance === 2 &&
+                              r.authority !== walletPk)) && (
+                            <button
+                              className="backbtn"
+                              style={{ fontSize: "11px", padding: "3px 12px" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                submitDeregister(i);
+                              }}
+                            >
+                              ▸ DEREGISTER
+                            </button>
+                          )}
                       </div>
                     </div>
                   ) : (
                     /* Encrypted (scrambling) or decrypted single-line */
                     <div className={isDecrypted ? "rc-line" : "rc-raw"}>
-                      {isDecrypted ? rosterLine(r) : (rosterTexts[i] ?? scrambleLine(rosterLine(r)))}
+                      {isDecrypted
+                        ? rosterLine(r)
+                        : (rosterTexts[i] ?? scrambleLine(rosterLine(r)))}
                     </div>
                   )}
                 </div>
@@ -998,6 +1032,49 @@ export function ContactView({ config, isActive }: Props) {
             })}
           </div>
         )}
+
+        {/* Classified */}
+        <div
+          className={`classified ${classifiedOpen ? "unlocked" : "locked"}`}
+          id="classified"
+        >
+          <div className="cl-head">
+            <span className="t">GUESTBOOK · EYES ONLY</span>
+            <span className="jp">機密</span>
+            <span className="cl-stat" id="cl-stat">
+              {classifiedOpen ? "● DECRYPTED" : "● LOCKED"}
+            </span>
+          </div>
+          <div className="cl-body">
+            <div className="cl-row">
+              <span className="cl-k">DIRECT LINE</span>
+              <span className="cl-v" id="cl-line" ref={clLineRef}>
+                {classifiedOpen ? "" : "████████████████"}
+              </span>
+            </div>
+            <div className="cl-row">
+              <span className="cl-k">DOSSIER</span>
+              <span className="cl-v">
+                <a id="cl-resume" className="cl-dl" ref={clResumeRef}>
+                  {classifiedOpen ? "" : "████████████████"}
+                </a>
+              </span>
+            </div>
+            <div className="cl-row note">
+              <span className="cl-k">NOTE</span>
+              <span className="cl-v" id="cl-note" ref={clNoteRef}>
+                {classifiedOpen
+                  ? ""
+                  : "█████████ ████ ████████ ██ ████ ████ ████████ ████ ███ █████ ████."}
+              </span>
+            </div>
+            {!classifiedOpen && (
+              <div className="cl-lockmsg" id="cl-lockmsg">
+                // AUTHENTICATE VIA OVERSEER WALLET TO DECRYPT
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
