@@ -9,8 +9,10 @@ import {
 } from '@solana/web3.js';
 import type { OverseerRecord } from './types';
 
-export const PROGRAM_ID = new PublicKey('8ftm3ruaXh2sbrTeozPDmTQk8iJbG8SoUZtyYPFiq7jS');
-export const RPC_URL    = 'https://api.devnet.solana.com';
+export const PROGRAM_ID = new PublicKey(
+  process.env.NEXT_PUBLIC_PROGRAM_ID ?? '8ftm3ruaXh2sbrTeozPDmTQk8iJbG8SoUZtyYPFiq7jS',
+);
+export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? 'https://api.devnet.solana.com';
 
 const HEADER_SIZE = 72; // fixed record header, message starts at 0x48
 
@@ -160,6 +162,72 @@ export async function sendAndConfirm(serialized: Uint8Array): Promise<string> {
   const sig  = await conn.sendRawTransaction(serialized, { skipPreflight: false });
   await conn.confirmTransaction(sig, 'finalized');
   return sig;
+}
+
+// ── Deregister ────────────────────────────────────────────────────────────────
+
+export async function buildPromoteTx(
+  commander: PublicKey,
+  commanderPda: PublicKey,
+  targetPda: PublicKey,
+  targetWallet: PublicKey,
+): Promise<Transaction> {
+  const conn = getConnection();
+  // IX data: discriminator(1) + target_wallet(32)
+  const data = new Uint8Array(33);
+  data[0] = 2; // IX_PROMOTE
+  data.set(targetWallet.toBytes(), 1);
+  const ix = new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: commander,    isSigner: true,  isWritable: true  },
+      { pubkey: commanderPda, isSigner: false, isWritable: false },
+      { pubkey: targetPda,    isSigner: false, isWritable: true  },
+    ],
+    data: Buffer.from(data),
+  });
+  const { blockhash } = await conn.getLatestBlockhash('finalized');
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: commander });
+  tx.add(ix);
+  return tx;
+}
+
+export async function buildDeregisterSelfTx(authority: PublicKey): Promise<Transaction> {
+  const conn = getConnection();
+  const [pda] = await findOverseerPDA(authority);
+  const ix = new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: authority, isSigner: true,  isWritable: true },
+      { pubkey: pda,       isSigner: false, isWritable: true },
+    ],
+    data: Buffer.from([3]), // IX_DEREGISTER
+  });
+  const { blockhash } = await conn.getLatestBlockhash('finalized');
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority });
+  tx.add(ix);
+  return tx;
+}
+
+export async function buildDeregisterCommanderTx(
+  commander: PublicKey,
+  commanderPda: PublicKey,
+  targetPda: PublicKey,
+): Promise<Transaction> {
+  const conn = getConnection();
+  const ix = new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: commander,    isSigner: true,  isWritable: true  },
+      { pubkey: commanderPda, isSigner: false, isWritable: false },
+      { pubkey: targetPda,    isSigner: false, isWritable: true  },
+    ],
+    data: Buffer.from([3]), // IX_DEREGISTER
+  });
+  const { blockhash } = await conn.getLatestBlockhash('finalized');
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: commander });
+  tx.add(ix);
+  return tx;
 }
 
 export const GENESIS = '22kQ9csvmpgtaUxR92dsFRtQ6zDEMuT8wwngtBQs21Q2';

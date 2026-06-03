@@ -1885,7 +1885,7 @@ main {
 .rc-list{display:flex;flex-direction:column;gap:3px}
 .rc-entry{
     display:grid;grid-template-columns:28px 1fr;gap:12px;align-items:center;
-    border:1px solid var(--line);padding:10px 14px;cursor:crosshair;
+    border:1px solid rgba(255,120,40,0.20);padding:10px 14px;cursor:crosshair;
     min-height:44px;transition:border-color .15s,background .15s,min-height .2s;
     position:relative;
 }
@@ -1896,9 +1896,9 @@ main {
 /* encrypted: scrambling before first hover */
 .rc-raw{
     font-family:var(--font-t);font-size:12px;
-    color:var(--dim);letter-spacing:.02em;
+    color:var(--dim2);letter-spacing:.02em;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    cursor:crosshair;animation:flicker 3s infinite steps(1);
+    cursor:crosshair;
 }
 /* decrypted single-liner — persists after first hover */
 .rc-line{
@@ -1921,11 +1921,22 @@ main {
 .rc-visits b{color:var(--amber)}
 .rc-time{font-family:var(--font-m);font-size:12px;color:var(--dim)}
 .rc-msg{
-    font-family:var(--font-m);font-size:13px;color:var(--dim2);
-    border-left:2px solid var(--line-bright);padding-left:10px;
-    white-space:normal;line-height:1.5;
+    font-family:var(--font-m);font-size:16px;color:var(--white);
+    border-left:2px solid var(--line-bright);padding-left:12px;
+    white-space:normal;line-height:1.6;margin-top:4px;
 }
-.rc-entry.rc-self .rc-msg{border-left-color:rgba(125,255,122,.5);color:var(--white)}
+.rc-entry.rc-self .rc-msg{border-left-color:rgba(125,255,122,.5);color:var(--amber-b)}
+
+/* rank legend */
+.roster-ranks{
+    display:flex;flex-direction:column;gap:8px;
+    font-family:var(--font-m);
+    padding:12px 0 16px;border-bottom:1px solid var(--line);margin-bottom:12px;
+}
+.rr-item{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rr-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+.rr-label{font-size:15px;letter-spacing:.06em;font-weight:700}
+.rr-desc{color:var(--dim2);font-size:14px}
 
 /* classified */
 .classified {

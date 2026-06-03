@@ -15,9 +15,10 @@ import {
   findOverseerPDA,
   buildRegisterTx,
   buildHeartbeatTx,
-  buildBootstrapTx,
+  buildDeregisterSelfTx,
+  buildDeregisterCommanderTx,
+  buildPromoteTx,
   sendAndConfirm,
-  GENESIS,
 } from "@/lib/solana/guestlist";
 import { useNerv } from "@/components/context/NervContext";
 import { Sound } from "@/lib/sound";
@@ -80,6 +81,7 @@ type WalletProvider = {
   signTransaction: (tx: unknown) => Promise<{ serialize: () => Uint8Array }>;
   // Solflare supports signAndSendTransaction — bypasses its own preflight simulation
   signAndSendTransaction?: (tx: unknown, opts?: { skipPreflight?: boolean }) => Promise<{ signature: string }>;
+  disconnect?: () => Promise<void>;
 };
 
 function getProvider(): WalletProvider | null {
@@ -136,8 +138,6 @@ export function ContactView({ config, isActive }: Props) {
   >("idle");
   const [txMsg, setTxMsg] = useState("");
 
-  // Genesis-only bootstrap
-  const [showBootstrap, setShowBootstrap] = useState(false);
 
   // Classified
   const [classifiedOpen, setClassifiedOpen] = useState(false);
@@ -336,36 +336,118 @@ export function ContactView({ config, isActive }: Props) {
     }
   }
 
-  // ── Bootstrap (genesis only) ─────────────────────────────────────────────────
-  async function submitBootstrap() {
-    if (!walletPk) return;
+  // ── Deregister ────────────────────────────────────────────────────────────────
+  async function submitDeregister(rosterIdx: number) {
+    const r = roster[rosterIdx];
     const provider = getProvider();
-    if (!provider) return;
-    const authority = new PublicKey(walletPk);
-    setTxStatus("pending");
-    setTxMsg("bootstrapping COMMANDER clearance…");
-    try {
-      const tx = await buildBootstrapTx(authority);
-      setTxMsg("sign in Solflare…");
-      const signed = (await provider.signTransaction(tx)) as {
-        serialize: () => Uint8Array;
-      };
-      setTxMsg("waiting for finalized confirmation…");
-      const sig = await sendAndConfirm(signed.serialize());
-      setTxStatus("finalized");
-      setTxMsg("✓ COMMANDER clearance granted · " + sig.slice(0, 8) + "…");
-      setShowBootstrap(false);
-      emitJmp("CALL bootstrap   ; GENESIS ELEVATION COMPLETE");
-      flashStatus("COMMANDER", false);
-      Sound.confirm();
-      const updated = await fetchOverseerRecord(authority);
-      if (updated) setOwnRecord(updated);
-    } catch (e: unknown) {
-      setTxStatus("err");
-      setTxMsg("✕ " + (e instanceof Error ? e.message : "bootstrap failed"));
-      flashStatus("BOOTSTRAP ERR", true);
-      Sound.deny();
-    }
+    if (!provider || !walletPk) return;
+    const isSelf = r.authority === walletPk;
+    const isCommander = ownRecord?.clearance === 2;
+    if (!isSelf && !isCommander) return;
+
+    triggerTribunal(
+      `DEREGISTER ${r.codename.toUpperCase() || r.authority.slice(0, 8)}`,
+      async (ok) => {
+        if (!ok) return;
+        const authority = new PublicKey(walletPk);
+        setTxStatus('pending');
+        setTxMsg('building deregister transaction…');
+        try {
+          let tx;
+          if (isSelf) {
+            tx = await buildDeregisterSelfTx(authority);
+          } else {
+            tx = await buildDeregisterCommanderTx(
+              authority,
+              new PublicKey(ownRecord!.pubkey),
+              new PublicKey(r.pubkey),
+            );
+          }
+          setTxMsg('sign in Solflare…');
+          const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
+          setTxMsg('waiting for finalized confirmation…');
+          const sig = await sendAndConfirm(signed.serialize());
+          setTxStatus('finalized');
+          setTxMsg('✓ deregistered · ' + sig.slice(0, 8) + '…');
+          setRoster(prev => prev.filter((_, i) => i !== rosterIdx));
+          if (isSelf) { setOwnRecord(null); setClassifiedOpen(false); ctxSetAuthed(false); }
+          emitJmp('CALL deregister   ; ' + (r.codename || r.authority.slice(0, 8)).toUpperCase());
+          flashStatus('DEREGISTERED', false);
+          Sound.confirm();
+        } catch (e: unknown) {
+          console.error('[deregister]', e);
+          setTxStatus('err');
+          setTxMsg('✕ ' + (e instanceof Error ? e.message : 'deregister failed'));
+          flashStatus('DEREG FAILED', true);
+          Sound.deny();
+        }
+      },
+      false,
+    );
+  }
+
+  // ── Promote (commander → operative becomes overseer) ─────────────────────────
+  async function submitPromote(rosterIdx: number) {
+    const r = roster[rosterIdx];
+    const provider = getProvider();
+    if (!provider || !walletPk || ownRecord?.clearance !== 2) return;
+    if (r.clearance !== 0) return; // only OPERATIVE can be promoted
+
+    triggerTribunal(
+      `PROMOTE ${r.codename.toUpperCase() || r.authority.slice(0, 8)} → OVERSEER`,
+      async (ok) => {
+        if (!ok) return;
+        const commander = new PublicKey(walletPk);
+        setTxStatus('pending');
+        setTxMsg('building promote transaction…');
+        try {
+          const tx = await buildPromoteTx(
+            commander,
+            new PublicKey(ownRecord!.pubkey),
+            new PublicKey(r.pubkey),
+            new PublicKey(r.authority),
+          );
+          setTxMsg('sign in Solflare…');
+          const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
+          setTxMsg('waiting for finalized confirmation…');
+          const sig = await sendAndConfirm(signed.serialize());
+          setTxStatus('finalized');
+          setTxMsg('✓ promoted · ' + sig.slice(0, 8) + '…');
+          // Update clearance in roster
+          setRoster(prev => prev.map((rec, i) =>
+            i === rosterIdx ? { ...rec, clearance: 1 as const } : rec,
+          ));
+          // Update decrypted text for this row
+          const updated = { ...r, clearance: 1 as const };
+          setRosterTexts(prev => prev.map((t, i) => i === rosterIdx ? rosterLine(updated) : t));
+          emitJmp(`CALL promote   ; ${r.codename.toUpperCase()} → OVERSEER`);
+          flashStatus('PROMOTED', false);
+          Sound.confirm();
+        } catch (e: unknown) {
+          console.error('[promote]', e);
+          setTxStatus('err');
+          setTxMsg('✕ ' + (e instanceof Error ? e.message : 'promote failed'));
+          flashStatus('PROMOTE FAILED', true);
+          Sound.deny();
+        }
+      },
+      false,
+    );
+  }
+
+  // ── Disconnect ────────────────────────────────────────────────────────────────
+  async function disconnectWallet() {
+    const provider = getProvider();
+    try { await provider?.disconnect?.(); } catch {}
+    setWalletPk(null);
+    setOwnRecord(null);
+    setClassifiedOpen(false);
+    setShowForm(false);
+    setTxStatus('idle');
+    setTxMsg('');
+    ctxSetAuthed(false);
+    emitJmp('CALL disconnect   ; SESSION TERMINATED');
+    flashStatus('DISCONNECTED', false);
   }
 
   // ── Main wallet connect ───────────────────────────────────────────────────────
@@ -398,7 +480,6 @@ export function ContactView({ config, isActive }: Props) {
             unlockClassified();
             ctxSetAuthed(true);
             // Show bootstrap button only for genesis wallet that hasn't been elevated yet
-            if (pk === GENESIS && record.clearance < 2) setShowBootstrap(true);
           } else {
             setTxMsg("");
             setCodenameInput(pk.slice(0, 6).toUpperCase());
@@ -594,6 +675,16 @@ export function ContactView({ config, isActive }: Props) {
           </button>
         )}
 
+        {walletPk && (
+          <button
+            className="pbtn"
+            style={{ marginTop: '10px', fontSize: '12px', padding: '6px 14px', borderColor: 'var(--dim)', color: 'var(--dim2)' }}
+            onClick={disconnectWallet}
+          >
+            ▸ DISCONNECT
+          </button>
+        )}
+
         {/* TX status line */}
         {txMsg && (
           <div
@@ -669,31 +760,6 @@ export function ContactView({ config, isActive }: Props) {
           </div>
         )}
 
-        {/* Bootstrap — genesis only, hidden from everyone else */}
-        {showBootstrap && (
-          <div
-            className="auth"
-            style={{ borderColor: "var(--accent)", marginTop: "14px" }}
-          >
-            <div className="ah">
-              <span className="t">Genesis Bootstrap</span>
-              <span className="jp">初期化</span>
-            </div>
-            <p>
-              Your wallet matches the genesis authority hardcoded in the
-              program. Call <b>bootstrap()</b> once to elevate your record to
-              COMMANDER clearance.
-            </p>
-            <button
-              className="pbtn demo"
-              onClick={submitBootstrap}
-              disabled={txStatus === "pending"}
-              style={{ marginTop: "8px" }}
-            >
-              {txStatus === "pending" ? "⟳ PENDING…" : "▸ BOOTSTRAP COMMANDER"}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Classified */}
@@ -757,6 +823,21 @@ export function ContactView({ config, isActive }: Props) {
           <div className="roster-loading">fetching registry…</div>
         )}
 
+        {/* Rank legend */}
+        <div className="roster-ranks">
+          {[
+            { color: 'var(--accent)',  label: 'OPERATIVE',  desc: 'newly enrolled — wallet verified on-chain' },
+            { color: 'var(--amber)',   label: 'OVERSEER',   desc: 'elevated by commander' },
+            { color: 'var(--cyan)',    label: 'COMMANDER',  desc: 'genesis authority — program deployer' },
+          ].map(({ color, label, desc }) => (
+            <div className="rr-item" key={label}>
+              <span className="rr-dot" style={{ background: color, boxShadow: `0 0 5px ${color}` }} />
+              <span className="rr-label" style={{ color }}>{label}</span>
+              <span className="rr-desc">— {desc}</span>
+            </div>
+          ))}
+        </div>
+
         {rosterLoaded && roster.length === 0 && (
           <div className="roster-empty">
             // NO OVERSEERS ENROLLED YET — BE THE FIRST
@@ -806,6 +887,31 @@ export function ContactView({ config, isActive }: Props) {
                           {r.message.length > 160 ? "…" : ""}&rdquo;
                         </div>
                       )}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                        {/* Promote — commander only, on OPERATIVE rows that aren't self */}
+                        {walletPk && ownRecord?.clearance === 2 && r.clearance === 0 && r.authority !== walletPk && (
+                          <button
+                            className="backbtn"
+                            style={{ fontSize: '11px', padding: '3px 12px', borderColor: 'var(--cyan)', color: 'var(--cyan)' }}
+                            onClick={(e) => { e.stopPropagation(); submitPromote(i); }}
+                          >
+                            ▸ PROMOTE
+                          </button>
+                        )}
+                        {/* Deregister — own record (non-commander) OR commander deregistering others */}
+                        {walletPk && (
+                          (r.authority === walletPk && (ownRecord?.clearance ?? 0) < 2) ||
+                          (ownRecord?.clearance === 2 && r.authority !== walletPk)
+                        ) && (
+                          <button
+                            className="backbtn"
+                            style={{ fontSize: '11px', padding: '3px 12px' }}
+                            onClick={(e) => { e.stopPropagation(); submitDeregister(i); }}
+                          >
+                            ▸ DEREGISTER
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     /* Encrypted (scrambling) or decrypted single-line */
