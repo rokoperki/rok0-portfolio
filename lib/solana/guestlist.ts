@@ -192,6 +192,32 @@ export async function buildPromoteTx(
   return tx;
 }
 
+export async function buildUpdateMessageTx(
+  authority: PublicKey,
+  newMessage: string,
+): Promise<Transaction> {
+  const conn = getConnection();
+  const [pda] = await findOverseerPDA(authority);
+  const msgBytes = new TextEncoder().encode(newMessage.slice(0, 700));
+  const data = new Uint8Array(1 + 2 + msgBytes.length);
+  data[0] = 5; // IX_UPDATE_MESSAGE
+  data[1] = msgBytes.length & 0xff;
+  data[2] = (msgBytes.length >> 8) & 0xff;
+  data.set(msgBytes, 3);
+  const ix = new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: authority, isSigner: true,  isWritable: false },
+      { pubkey: pda,       isSigner: false, isWritable: true  },
+    ],
+    data: Buffer.from(data),
+  });
+  const { blockhash } = await conn.getLatestBlockhash('finalized');
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority });
+  tx.add(ix);
+  return tx;
+}
+
 export async function buildDeregisterSelfTx(authority: PublicKey): Promise<Transaction> {
   const conn = getConnection();
   const [pda] = await findOverseerPDA(authority);

@@ -15,6 +15,7 @@ import {
   findOverseerPDA,
   buildRegisterTx,
   buildHeartbeatTx,
+  buildUpdateMessageTx,
   buildDeregisterSelfTx,
   buildDeregisterCommanderTx,
   buildPromoteTx,
@@ -35,7 +36,7 @@ function rosterLine(r: OverseerRecord): string {
   return [
     r.codename || "???",
     CLEARANCE_LABELS[r.clearance],
-    `visits ${r.visits}`,
+    `visits ${r.visits + 1}`,
     relativeTime(r.lastSeen),
   ].join("  //  ");
 }
@@ -123,6 +124,8 @@ export function ContactView({ config, isActive }: Props) {
 
   // Register form
   const [showForm, setShowForm] = useState(false);
+  const [editingMsg, setEditingMsg] = useState(false);
+  const [editMsgInput, setEditMsgInput] = useState('');
 
   // Roster decrypt state
   const [hoveredRoster, setHoveredRoster] = useState<number | null>(null);
@@ -433,6 +436,41 @@ export function ContactView({ config, isActive }: Props) {
       },
       false,
     );
+  }
+
+  // ── Update message ───────────────────────────────────────────────────────────
+  async function submitUpdateMessage() {
+    if (!walletPk || !editMsgInput.trim()) return;
+    const provider = getProvider();
+    if (!provider) return;
+    const authority = new PublicKey(walletPk);
+    setTxStatus('pending');
+    setTxMsg('building update transaction…');
+    try {
+      const tx = await buildUpdateMessageTx(authority, editMsgInput.trim());
+      setTxMsg('sign in Solflare…');
+      const signed = (await provider.signTransaction(tx)) as { serialize: () => Uint8Array };
+      setTxMsg('waiting for finalized confirmation…');
+      const sig = await sendAndConfirm(signed.serialize());
+      setTxStatus('finalized');
+      setTxMsg('✓ message updated · ' + sig.slice(0, 8) + '…');
+      const newMsg = editMsgInput.trim();
+      setOwnRecord(prev => prev ? { ...prev, message: newMsg } : prev);
+      setRoster(prev => prev.map(r =>
+        r.authority === walletPk ? { ...r, message: newMsg } : r,
+      ));
+      setEditingMsg(false);
+      setEditMsgInput('');
+      emitJmp('CALL update_msg   ; MESSAGE UPDATED');
+      flashStatus('MSG UPDATED', false);
+      Sound.confirm();
+    } catch (e: unknown) {
+      console.error('[update_msg]', e);
+      setTxStatus('err');
+      setTxMsg('✕ ' + (e instanceof Error ? e.message : 'update failed'));
+      flashStatus('UPDATE FAILED', true);
+      Sound.deny();
+    }
   }
 
   // ── Disconnect ────────────────────────────────────────────────────────────────
@@ -749,13 +787,50 @@ export function ContactView({ config, isActive }: Props) {
             </div>
             <div className="or-meta">
               <span>
-                visits <b>{ownRecord.visits}</b>
+                visits <b>{ownRecord.visits + 1}</b>
               </span>
               <span>enrolled {relativeTime(ownRecord.enrolledAt)}</span>
               <span>last seen {relativeTime(ownRecord.lastSeen)}</span>
             </div>
-            {ownRecord.message && (
+            {ownRecord.message && !editingMsg && (
               <div className="or-msg">"{ownRecord.message}"</div>
+            )}
+            {editingMsg ? (
+              <div className="register-form" style={{ marginTop: '10px' }}>
+                <div className="rf-row">
+                  <label className="rf-label">NEW MESSAGE</label>
+                  <textarea
+                    className="rf-input"
+                    rows={2}
+                    maxLength={700}
+                    value={editMsgInput}
+                    onChange={e => setEditMsgInput(e.target.value)}
+                    placeholder="max 700 chars"
+                    spellCheck={false}
+                    autoFocus
+                  />
+                </div>
+                <div className="rf-actions">
+                  <button
+                    className="pbtn src"
+                    onClick={submitUpdateMessage}
+                    disabled={txStatus === 'pending' || !editMsgInput.trim()}
+                  >
+                    {txStatus === 'pending' ? '⟳ PENDING…' : '▸ UPDATE ON-CHAIN'}
+                  </button>
+                  <button className="pbtn" onClick={() => { setEditingMsg(false); setEditMsgInput(''); }}>
+                    CANCEL
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="backbtn"
+                style={{ fontSize: '11px', padding: '3px 12px', marginTop: '8px', display: 'inline-block' }}
+                onClick={() => { setEditingMsg(true); setEditMsgInput(ownRecord.message); }}
+              >
+                ▸ {ownRecord.message ? 'EDIT MESSAGE' : 'ADD MESSAGE'}
+              </button>
             )}
           </div>
         )}
@@ -875,7 +950,7 @@ export function ContactView({ config, isActive }: Props) {
                           {CLEARANCE_LABELS[r.clearance]}
                         </span>
                         <span className="rc-visits">
-                          visits <b>{r.visits}</b>
+                          visits <b>{r.visits + 1}</b>
                         </span>
                         <span className="rc-time">
                           {relativeTime(r.lastSeen)}
@@ -883,8 +958,7 @@ export function ContactView({ config, isActive }: Props) {
                       </div>
                       {r.message && (
                         <div className="rc-msg">
-                          &ldquo;{r.message.slice(0, 160)}
-                          {r.message.length > 160 ? "…" : ""}&rdquo;
+                          &ldquo;{r.message}&rdquo;
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
@@ -916,7 +990,7 @@ export function ContactView({ config, isActive }: Props) {
                   ) : (
                     /* Encrypted (scrambling) or decrypted single-line */
                     <div className={isDecrypted ? "rc-line" : "rc-raw"}>
-                      {rosterTexts[i] ?? scrambleLine(rosterLine(r))}
+                      {isDecrypted ? rosterLine(r) : (rosterTexts[i] ?? scrambleLine(rosterLine(r)))}
                     </div>
                   )}
                 </div>
