@@ -94,9 +94,8 @@ export function TopBar({ handle }: { handle?: Ref<TopBarHandle> }) {
       <div className="brand">
         <div className="hex-badge">
           <svg width="30" height="34" viewBox="0 0 30 34">
-            <polygon points="15,1 29,9 29,25 15,33 1,25 1,9" fill="none" stroke="#ff3b1f" strokeWidth="1.5" />
-            <polygon points="15,8 22,12 22,22 15,26 8,22 8,12" fill="#ff3b1f" opacity="0.18" />
-            <text x="15" y="20" textAnchor="middle" fontFamily="JetBrains Mono" fontSize="10" fill="#ff3b1f">N</text>
+            <polygon points="15,1 29,9 29,25 15,33 1,25 1,9" fill="none" stroke="#b52200" strokeWidth="1.5" />
+            <polygon points="15,8 22,12 22,22 15,26 8,22 8,12" fill="#b52200" />
           </svg>
         </div>
         <div className="wm">
