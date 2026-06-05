@@ -37,9 +37,10 @@ export function parseRecord(pubkey: string, data: Buffer | Uint8Array): Overseer
   const lastSeen   = Number(dv.getBigInt64(0x38, true));
   const visits     = dv.getUint32(0x40, true);
   const clearance  = u8[0x44] as 0 | 1 | 2;
+  const bump       = u8[0x45];
   const msgLen     = dv.getUint16(0x46, true);
   const message    = msgLen > 0 ? new TextDecoder().decode(u8.slice(0x48, 0x48 + msgLen)) : '';
-  return { pubkey, authority, codename, enrolledAt, lastSeen, visits, clearance, message };
+  return { pubkey, authority, codename, enrolledAt, lastSeen, visits, clearance, bump, message };
 }
 
 // ── PDA ───────────────────────────────────────────────────────────────────────

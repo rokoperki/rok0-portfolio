@@ -6,6 +6,7 @@ export interface OverseerRecord {
   lastSeen: number;    // unix seconds
   visits: number;
   clearance: 0 | 1 | 2;
+  bump: number;
   message: string;
 }
 

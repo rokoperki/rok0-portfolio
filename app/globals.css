@@ -1951,10 +1951,54 @@ main {
 }
 /* decoded: human-readable record — animated in */
 .rc-decoded {
-    animation: viewin 0.2s ease;
+    animation: rcOpen 0.22s ease forwards;
     display: flex;
     flex-direction: column;
     gap: 5px;
+}
+.rc-decoded.rc-closing {
+    animation: rcClose 0.18s ease forwards;
+}
+@keyframes rcOpen {
+    from { opacity: 0; transform: translateY(-5px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes rcClose {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(-5px); }
+}
+
+/* memory layout table inside decoded roster row */
+.mem-layout{font-family:var(--font-t);font-size:12px;display:flex;flex-direction:column;gap:1px;overflow-x:auto}
+.mem-row{
+    display:grid;
+    grid-template-columns:52px 100px 80px 1fr;
+    gap:10px;align-items:baseline;
+    padding:2px 0;border-bottom:1px dotted rgba(255,110,50,0.12);
+}
+.mem-offset{color:var(--dim);font-size:11px;white-space:nowrap}
+.mem-field{color:var(--amber);letter-spacing:.02em;white-space:nowrap}
+.mem-type{color:var(--dim2);font-size:11px;white-space:nowrap}
+.mem-val{color:var(--white);word-break:break-all;line-height:1.4}
+.mem-val .mem-comment{color:var(--dim);font-size:11px}
+.mem-total{font-family:var(--font-t);font-size:11px;color:var(--dim);margin-top:5px;padding-left:0;letter-spacing:.02em;word-break:break-all;line-height:1.5}
+/* message row: label line + full-width content below */
+.mem-row-msg{display:flex;flex-direction:column;gap:4px;padding:2px 0;border-bottom:1px dotted rgba(255,110,50,0.12)}
+.mem-row-msg .mem-row-head{display:flex;gap:10px;align-items:baseline}
+.mem-row-msg .mem-offset{color:var(--dim);font-size:11px;white-space:nowrap}
+.mem-row-msg .mem-field{color:var(--amber);letter-spacing:.02em}
+.mem-row-msg .mem-type{color:var(--dim2);font-size:11px}
+.mem-row-msg .mem-val{color:var(--white);word-break:break-word;line-height:1.6;font-size:12px}
+@media(max-width:900px){
+    .mem-layout{font-size:11px}
+    .mem-row{grid-template-columns:44px 80px 1fr;gap:5px}
+    .mem-type{display:none}
+    .mem-offset{font-size:10px}
+    .mem-total{font-size:10px}
+    .rc-entry{grid-template-columns:22px 1fr;gap:6px;padding:8px 10px}
+    /* split total line into two rows on mobile */
+    .mem-total-sep{display:none}
+    .mem-total-pda{display:block;margin-top:2px;word-break:break-all}
 }
 .rc-head {
     display: flex;

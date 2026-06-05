@@ -131,7 +131,9 @@ export function ContactView({ config, isActive }: Props) {
   const [editMsgInput, setEditMsgInput] = useState("");
 
   // Roster decrypt state
-  const [hoveredRoster, setHoveredRoster] = useState<number | null>(null);
+  const [hoveredRoster,  setHoveredRoster]  = useState<number | null>(null);
+  const [closingRow,     setClosingRow]     = useState<number | null>(null);
+  const closingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [decryptedRows, setDecryptedRows] = useState<boolean[]>([]);
   const [rosterTexts, setRosterTexts] = useState<string[]>([]);
   const animatingRef = useRef(new Set<number>());
@@ -949,90 +951,116 @@ export function ContactView({ config, isActive }: Props) {
                   key={r.pubkey}
                   className={`rc-entry${r.authority === walletPk ? " rc-self" : ""}${isDecrypted ? " rc-unlocked" : ""}`}
                   onMouseEnter={() => {
+                    if (closingTimer.current) { clearTimeout(closingTimer.current); closingTimer.current = null; }
+                    setClosingRow(null);
                     setHoveredRoster(i);
                     startDecrypt(i);
                   }}
-                  onMouseLeave={() => setHoveredRoster(null)}
+                  onMouseLeave={() => {
+                    if (isDecrypted) {
+                      setClosingRow(i);
+                      setHoveredRoster(null);
+                      closingTimer.current = setTimeout(() => { setClosingRow(null); }, 200);
+                    } else {
+                      setHoveredRoster(null);
+                    }
+                  }}
                 >
                   <span className="rc-idx">
                     {String(i + 1).padStart(2, "0")}
                   </span>
-                  {/* Show full decoded view only after decrypt + hover */}
-                  {isDecrypted && isHovered ? (
-                    <div className="rc-decoded">
-                      <div className="rc-head">
-                        <span className="rc-codename">
-                          {r.codename || "???"}
-                        </span>
-                        <span
-                          className={`st ${r.clearance === 2 ? "run" : r.clearance === 1 ? "sync" : "halt"}`}
-                        >
-                          {CLEARANCE_LABELS[r.clearance]}
-                        </span>
-                        <span className="rc-visits">
-                          visits <b>{r.visits + 1}</b>
-                        </span>
-                        <span className="rc-time">
-                          {relativeTime(r.lastSeen)}
-                        </span>
-                      </div>
-                      {r.message && (
-                        <div className="rc-msg">&ldquo;{r.message}&rdquo;</div>
-                      )}
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          marginTop: "8px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        {/* Promote — commander only, on OPERATIVE rows that aren't self */}
-                        {walletPk &&
-                          ownRecord?.clearance === 2 &&
-                          r.clearance === 0 &&
-                          r.authority !== walletPk && (
-                            <button
-                              className="backbtn"
-                              style={{
-                                fontSize: "11px",
-                                padding: "3px 12px",
-                                borderColor: "var(--cyan)",
-                                color: "var(--cyan)",
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                submitPromote(i);
-                              }}
-                            >
-                              ▸ PROMOTE
-                            </button>
-                          )}
-                        {/* Deregister — own record (non-commander) OR commander deregistering others */}
-                        {walletPk &&
-                          ((r.authority === walletPk &&
-                            (ownRecord?.clearance ?? 0) < 2) ||
-                            (ownRecord?.clearance === 2 &&
-                              r.authority !== walletPk)) && (
-                            <button
-                              className="backbtn"
-                              style={{ fontSize: "11px", padding: "3px 12px" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                submitDeregister(i);
-                              }}
-                            >
-                              ▸ DEREGISTER
-                            </button>
-                          )}
+                  {isDecrypted && (isHovered || closingRow === i) ? (
+                    <div className={`rc-decoded${closingRow === i ? ' rc-closing' : ''}`}>
+                      {/* Memory layout view */}
+                      {(() => {
+                        const msgBytes = new TextEncoder().encode(r.message).length;
+                        return (
+                          <div className="mem-layout">
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x00</span>
+                              <span className="mem-field">authority</span>
+                              <span className="mem-type">[u8;32]</span>
+                              <span className="mem-val">{r.authority.slice(0,6)}…{r.authority.slice(-6)}</span>
+                            </div>
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x20</span>
+                              <span className="mem-field">codename</span>
+                              <span className="mem-type">[u8;16]</span>
+                              <span className="mem-val">"{r.codename || '???'}"</span>
+                            </div>
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x30</span>
+                              <span className="mem-field">enrolled_at</span>
+                              <span className="mem-type">i64</span>
+                              <span className="mem-val">{r.enrolledAt} <span className="mem-comment">// {relativeTime(r.enrolledAt)}</span></span>
+                            </div>
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x38</span>
+                              <span className="mem-field">last_seen</span>
+                              <span className="mem-type">i64</span>
+                              <span className="mem-val">{r.lastSeen} <span className="mem-comment">// {relativeTime(r.lastSeen)}</span></span>
+                            </div>
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x40</span>
+                              <span className="mem-field">visits</span>
+                              <span className="mem-type">u32</span>
+                              <span className="mem-val">{r.visits + 1}</span>
+                            </div>
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x44</span>
+                              <span className="mem-field">clearance</span>
+                              <span className="mem-type">u8</span>
+                              <span className="mem-val">{r.clearance} <span className="mem-comment">// {CLEARANCE_LABELS[r.clearance]}</span></span>
+                            </div>
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x45</span>
+                              <span className="mem-field">bump</span>
+                              <span className="mem-type">u8</span>
+                              <span className="mem-val">{r.bump ?? '—'}</span>
+                            </div>
+                            <div className="mem-row">
+                              <span className="mem-offset">+0x46</span>
+                              <span className="mem-field">msg_len</span>
+                              <span className="mem-type">u16</span>
+                              <span className="mem-val">{msgBytes}</span>
+                            </div>
+                            {r.message && (
+                              <div className="mem-row-msg">
+                                <div className="mem-row-head">
+                                  <span className="mem-offset">+0x48</span>
+                                  <span className="mem-field">message</span>
+                                  <span className="mem-type">[u8;{msgBytes}]</span>
+                                </div>
+                                <span className="mem-val">"{r.message}"</span>
+                              </div>
+                            )}
+                            <div className="mem-total">
+                              <span className="mem-total-bytes">// total: 72 + {msgBytes} bytes</span>
+                              <span className="mem-total-sep"> · </span>
+                              <span className="mem-total-pda">PDA: {r.pubkey}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      {/* Action buttons */}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                        {walletPk && ownRecord?.clearance === 2 && r.clearance === 0 && r.authority !== walletPk && (
+                          <button className="backbtn" style={{ fontSize: '11px', padding: '3px 12px', borderColor: 'var(--cyan)', color: 'var(--cyan)' }}
+                            onClick={e => { e.stopPropagation(); submitPromote(i); }}>
+                            ▸ PROMOTE
+                          </button>
+                        )}
+                        {walletPk && ((r.authority === walletPk && (ownRecord?.clearance ?? 0) < 2) || (ownRecord?.clearance === 2 && r.authority !== walletPk)) && (
+                          <button className="backbtn" style={{ fontSize: '11px', padding: '3px 12px' }}
+                            onClick={e => { e.stopPropagation(); submitDeregister(i); }}>
+                            ▸ DEREGISTER
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (
-                    /* Encrypted (scrambling) or decrypted single-line */
-                    <div className={isDecrypted ? "rc-line" : "rc-raw"}>
-                      {isDecrypted
-                        ? rosterLine(r)
-                        : (rosterTexts[i] ?? scrambleLine(rosterLine(r)))}
+                    <div className={isDecrypted ? 'rc-line' : 'rc-raw'}>
+                      {isDecrypted ? rosterLine(r) : (rosterTexts[i] ?? scrambleLine(rosterLine(r)))}
                     </div>
                   )}
                 </div>
